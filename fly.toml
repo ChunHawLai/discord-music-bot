@@ -1,0 +1,16 @@
+# Fly.io config. Set DISCORD_TOKEN with: fly secrets set DISCORD_TOKEN=...
+app = 'discord-music-bot'
+primary_region = 'iad'
+
+[build]
+
+[env]
+  FFMPEG_EXECUTABLE = 'ffmpeg'
+
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1
+
+[processes]
+  app = 'python bot.py'
