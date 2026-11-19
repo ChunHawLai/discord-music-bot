@@ -51,7 +51,7 @@ A Discord bot that searches and plays audio from YouTube, with a queue. Built wi
 
 ---
 
-## Hosting (24/7, without leaving your PC on)
+## Hosting 
 
 See **[HOSTING.md](HOSTING.md)** for full guides:
 
