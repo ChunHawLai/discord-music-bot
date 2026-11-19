@@ -48,10 +48,11 @@ A Discord bot that searches and plays audio from YouTube, with a queue. Built wi
    ```powershell
    .\.venv\Scripts\python.exe bot.py
    ```
+   To stop it cleanly, press `Ctrl+C` in the console window (this updates the bot's Discord status instantly).
 
 ---
 
-## Hosting 
+## Hosting
 
 See **[HOSTING.md](HOSTING.md)** for full guides:
 
@@ -84,4 +85,4 @@ See **[HOSTING.md](HOSTING.md)** for full guides:
 - Audio is **streamed**, not downloaded, so it uses little disk.
 - Age-restricted / members-only videos may fail — a YouTube limitation.
 - YouTube changes periodically and can break `yt-dlp`. Fix: `pip install -U yt-dlp`.
-- If Discord changes its voice protocol, keep `davey` installed (`davey>=0.1.0`), used by discord.py 2.7+ for voice encryption.
+- If Discord changes its voice protocol, keep `davey` installed (`davey==0.1.7`, pinned in `requirements.txt`), used by discord.py 2.7+ for voice encryption.
