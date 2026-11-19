@@ -30,7 +30,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 INTENTS = discord.Intents.default()
 INTENTS.message_content = True  # Required so the bot can read !play messages
 
-bot = commands.Bot(command_prefix="!", intents=INTENTS)
+bot = commands.Bot(command_prefix="!", intents=INTENTS, help_command=None)
 
 FFMPEG_EXECUTABLE = os.getenv("FFMPEG_EXECUTABLE", "ffmpeg")
 
@@ -165,6 +165,31 @@ async def on_ready():
 # --------------------------------------------------------------------------- #
 # Commands
 # --------------------------------------------------------------------------- #
+@bot.command(name="help", aliases=["commands", "h"])
+async def help_command(ctx: commands.Context):
+    """Show all available commands."""
+    embed = discord.Embed(
+        title="🎵 Music Bot Commands",
+        description="Here's everything I can do:",
+        color=discord.Color.blurple(),
+    )
+    for name, desc in [
+        ("!play <song or URL>", "Search YouTube and play (adds to queue)"),
+        ("!pause", "Pause playback"),
+        ("!resume", "Resume playback"),
+        ("!skip", "Skip the current song"),
+        ("!stop", "Stop and clear the queue"),
+        ("!queue", "Show the queue"),
+        ("!volume <0-100>", "Set volume"),
+        ("!join", "Join your voice channel"),
+        ("!leave", "Leave the voice channel"),
+        ("!help", "Show this message"),
+    ]:
+        embed.add_field(name=name, value=desc, inline=False)
+    embed.set_footer(text="Tip: join a voice channel first, then use !play")
+    await ctx.send(embed=embed)
+
+
 @bot.command(name="join", aliases=["connect"])
 async def join(ctx: commands.Context):
     if await ensure_voice(ctx):

@@ -17,6 +17,7 @@ A Discord bot that searches and plays audio from YouTube, with a queue. Built wi
 | `!volume <0-100>` | Set volume |
 | `!join` | Join your voice channel |
 | `!leave` | Leave the voice channel |
+| `!help` | Show all commands |
 
 ---
 
