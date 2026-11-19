@@ -1,7 +1,8 @@
 """A Discord music bot that searches and plays audio from YouTube.
 
 Commands:
-    !play <query or url>   Search YouTube (or play a URL) and add to the queue
+    !play <query or url>   Play one song (a playlist link plays its first song)
+    !playlist <url>        Add every song from a playlist URL to the queue
     !pause                 Pause playback
     !resume                Resume playback
     !skip                  Skip the current song
@@ -10,6 +11,7 @@ Commands:
     !volume <0-100>        Set volume
     !join                  Join your voice channel
     !leave                 Leave the voice channel
+    !help                  Show all commands
 """
 
 import asyncio
@@ -54,6 +56,8 @@ FFMPEG_OPTIONS = {
 }
 
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
+# Playlist extraction tolerates unavailable/private videos instead of aborting.
+ytdl_playlist = yt_dlp.YoutubeDL({**YTDL_OPTIONS, "ignoreerrors": True})
 # A second extractor that never expands playlists — used when playing an
 # individual queued song, so a video URL containing "list=" doesn't re-expand.
 ytdl_single = yt_dlp.YoutubeDL({
@@ -64,6 +68,8 @@ ytdl_single = yt_dlp.YoutubeDL({
 
 queues: dict[int, list[dict]] = {}
 volumes: dict[int, float] = {}
+# Serializes playback start per guild so two commands can't play at once.
+play_locks: dict[int, asyncio.Lock] = {}
 
 
 # --------------------------------------------------------------------------- #
@@ -102,10 +108,10 @@ class YTDLSource(discord.PCMVolumeTransformer):
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
-async def extract_info(url: str, *, single: bool = False) -> dict:
+async def extract_info(url: str, *, single: bool = False, tolerant: bool = False) -> dict:
     """Run yt-dlp in a thread so it doesn't block the bot's event loop."""
-    loop = asyncio.get_event_loop()
-    tool = ytdl_single if single else ytdl
+    loop = asyncio.get_running_loop()
+    tool = ytdl_single if single else (ytdl_playlist if tolerant else ytdl)
     return await loop.run_in_executor(
         None, lambda: tool.extract_info(url, download=False)
     )
@@ -117,6 +123,10 @@ def get_queue(guild_id: int) -> list[dict]:
 
 def get_volume(guild_id: int) -> float:
     return volumes.get(guild_id, 0.5)
+
+
+def get_play_lock(guild_id: int) -> asyncio.Lock:
+    return play_locks.setdefault(guild_id, asyncio.Lock())
 
 
 async def ensure_voice(ctx: commands.Context) -> bool:
@@ -144,26 +154,38 @@ def after_playback(ctx: commands.Context, error):
     asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop)
 
 
-async def play_next(ctx: commands.Context, *, announce: bool = True):
-    """Play the next song in this guild's queue, if any."""
-    queue = get_queue(ctx.guild.id)
-    vc = ctx.voice_client
-    if vc is None or not queue:
-        return
+async def play_next(ctx: commands.Context):
+    """Start the next queued song if idle. Safe to call from multiple places."""
+    async with get_play_lock(ctx.guild.id):
+        vc = ctx.voice_client
+        if vc is None or vc.is_playing() or vc.is_paused():
+            return  # Already playing; the finish callback will play the next one.
 
-    song = queue.pop(0)
-    try:
-        source = await YTDLSource.from_url(
-            song["web_url"], volume=get_volume(ctx.guild.id)
-        )
-    except Exception as exc:  # noqa: BLE001
-        await ctx.send(f"❌ Could not play **{song['title']}**: {exc}")
-        await play_next(ctx)
-        return
+        queue = get_queue(ctx.guild.id)
+        while queue:
+            song = queue.pop(0)
+            try:
+                source = await YTDLSource.from_url(
+                    song["web_url"], volume=get_volume(ctx.guild.id)
+                )
+            except Exception as exc:  # noqa: BLE001
+                await ctx.send(f"❌ Could not play **{song['title']}**: {exc}")
+                continue  # Skip the bad song and try the next one.
+            vc.play(source, after=lambda err: after_playback(ctx, err))
+            await ctx.send(f"🎵 Now playing: **{source.title}**")
+            return
 
-    vc.play(source, after=lambda err: after_playback(ctx, err))
-    if announce:
-        await ctx.send(f"🎵 Now playing: **{source.title}**")
+
+# --------------------------------------------------------------------------- #
+# Global checks
+# --------------------------------------------------------------------------- #
+@bot.check
+async def guild_only(ctx: commands.Context) -> bool:
+    """Voice/queue commands need a server; reject DMs before ctx.guild is used."""
+    if ctx.guild is None:
+        await ctx.send("❌ This bot only works inside a server.")
+        return False
+    return True
 
 
 # --------------------------------------------------------------------------- #
@@ -232,8 +254,8 @@ async def queue_single_song(ctx: commands.Context, query: str, search_msg):
             content=f"✅ Added to queue (#{len(queue)}): **{source.title}**"
         )
     else:
-        await search_msg.edit(content=f"🎵 Now playing: **{source.title}**")
-        await play_next(ctx, announce=False)
+        await search_msg.edit(content=f"⏳ Loading **{source.title}**...")
+    await play_next(ctx)
 
 
 @bot.command(name="play", aliases=["p"])
@@ -259,7 +281,7 @@ async def play_playlist(ctx: commands.Context, *, query: str):
 
     search_msg = await ctx.send("🔎 Loading playlist...")
     try:
-        data = await extract_info(query)
+        data = await extract_info(query, tolerant=True)
     except Exception as exc:  # noqa: BLE001
         await search_msg.edit(content=f"❌ Couldn't load that playlist: {exc}")
         return
@@ -288,10 +310,8 @@ async def play_playlist(ctx: commands.Context, *, query: str):
             content=f"✅ Added **{len(songs)}** songs from the playlist to the queue."
         )
     else:
-        await search_msg.edit(
-            content=f"✅ Added **{len(songs)}** songs — now playing: **{songs[0]['title']}**"
-        )
-        await play_next(ctx, announce=False)
+        await search_msg.edit(content=f"⏳ Loading **{len(songs)}** songs from the playlist...")
+    await play_next(ctx)
 
 
 @bot.command(name="pause")
