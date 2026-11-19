@@ -38,7 +38,7 @@ YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "outtmpl": "%(extractor)s-%(id)s-%(title)s.%(ext)s",
     "restrictfilenames": True,
-    "noplaylist": True,
+    "noplaylist": False,  # Allow playlists to be expanded into the queue
     "nocheckcertificate": True,
     "ignoreerrors": False,
     "logtostderr": False,
@@ -54,6 +54,9 @@ FFMPEG_OPTIONS = {
 }
 
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
+# A second extractor that never expands playlists — used when playing an
+# individual queued song, so a video URL containing "list=" doesn't re-expand.
+ytdl_single = yt_dlp.YoutubeDL({**YTDL_OPTIONS, "noplaylist": True})
 
 queues: dict[int, list[dict]] = {}
 volumes: dict[int, float] = {}
@@ -76,10 +79,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
     @classmethod
     async def from_url(cls, url: str, *, volume: float = 0.5):
         """Extract audio info without downloading, then build a streaming source."""
-        loop = asyncio.get_event_loop()
-        data = await loop.run_in_executor(
-            None, lambda: ytdl.extract_info(url, download=False)
-        )
+        data = await extract_info(url, single=True)
         if not data:
             raise ValueError("No results found.")
         if "entries" in data:
@@ -98,6 +98,21 @@ class YTDLSource(discord.PCMVolumeTransformer):
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
+async def extract_info(url: str, *, single: bool = False) -> dict:
+    """Run yt-dlp in a thread so it doesn't block the bot's event loop."""
+    loop = asyncio.get_event_loop()
+    tool = ytdl_single if single else ytdl
+    return await loop.run_in_executor(
+        None, lambda: tool.extract_info(url, download=False)
+    )
+
+
+def looks_like_playlist(query: str) -> bool:
+    """Rough check for a playlist URL (vs a plain search or single video)."""
+    q = query.lower()
+    return "list=" in q or "/playlist" in q
+
+
 def get_queue(guild_id: int) -> list[dict]:
     return queues.setdefault(guild_id, [])
 
@@ -174,7 +189,7 @@ async def help_command(ctx: commands.Context):
         color=discord.Color.blurple(),
     )
     for name, desc in [
-        ("!play <song or URL>", "Search YouTube and play (adds to queue)"),
+        ("!play <song or URL>", "Search YouTube, or paste a video/playlist URL"),
         ("!pause", "Pause playback"),
         ("!resume", "Resume playback"),
         ("!skip", "Skip the current song"),
@@ -205,13 +220,53 @@ async def play(ctx: commands.Context, *, query: str):
         return
 
     search_msg = await ctx.send("🔎 Searching YouTube...")
+    queue = get_queue(ctx.guild.id)
+
+    # --- Playlist URL: expand every entry into the queue ---
+    if looks_like_playlist(query):
+        try:
+            data = await extract_info(query)
+        except Exception as exc:  # noqa: BLE001
+            await search_msg.edit(content=f"❌ Couldn't load that playlist: {exc}")
+            return
+
+        entries = [e for e in (data.get("entries") or []) if e]
+        songs = []
+        for entry in entries:
+            web_url = entry.get("webpage_url") or entry.get("url")
+            if not web_url:
+                continue
+            songs.append({
+                "web_url": web_url,
+                "title": entry.get("title") or "Unknown title",
+                "duration": entry.get("duration"),
+                "requester": ctx.author.display_name,
+            })
+
+        if not songs:
+            await search_msg.edit(content="❌ No playable songs found in that playlist.")
+            return
+
+        queue.extend(songs)
+        vc = ctx.voice_client
+        if vc and (vc.is_playing() or vc.is_paused()):
+            await search_msg.edit(
+                content=f"✅ Added **{len(songs)}** songs from the playlist to the queue."
+            )
+        else:
+            await search_msg.edit(
+                content=f"✅ Added **{len(songs)}** songs — now playing: **{songs[0]['title']}**"
+            )
+            await play_next(ctx, announce=False)
+        return
+
+    # --- Single song / search query ---
     try:
         source = await YTDLSource.from_url(query, volume=get_volume(ctx.guild.id))
     except Exception as exc:  # noqa: BLE001
         await search_msg.edit(content=f"❌ Couldn't find or play that: {exc}")
         return
 
-    queue = get_queue(ctx.guild.id)
     queue.append({
         "web_url": source.webpage_url or source.url,
         "title": source.title,
