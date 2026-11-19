@@ -68,6 +68,10 @@ ytdl_single = yt_dlp.YoutubeDL({
 
 queues: dict[int, list[dict]] = {}
 volumes: dict[int, float] = {}
+# Last text channel used per guild, for the auto-leave notification.
+last_channels: dict[int, int] = {}
+# Seconds to wait (in case someone briefly disconnects) before leaving an empty channel.
+AUTO_LEAVE_DELAY = 30
 # Serializes playback start per guild so two commands can't play at once.
 play_locks: dict[int, asyncio.Lock] = {}
 
@@ -134,6 +138,7 @@ async def ensure_voice(ctx: commands.Context) -> bool:
     if not ctx.author.voice or not ctx.author.voice.channel:
         await ctx.send("❌ You need to join a voice channel first.")
         return False
+    last_channels[ctx.guild.id] = ctx.channel.id
     channel = ctx.author.voice.channel
     vc = ctx.voice_client
     if vc is None:
@@ -195,6 +200,41 @@ async def guild_only(ctx: commands.Context) -> bool:
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     print("------")
+
+
+@bot.event
+async def on_voice_state_update(member: discord.Member, before, after):
+    """Leave the voice channel once nobody else is in it."""
+    if member.guild is None:
+        return
+
+    vc = member.guild.voice_client
+    if vc is None or vc.channel is None:
+        return
+
+    # Only care when someone leaves (or moves out of) the bot's channel.
+    if before.channel != vc.channel or after.channel == vc.channel:
+        return
+    if any(not m.bot for m in vc.channel.members):
+        return  # At least one human is still there.
+
+    # Grace period: they might just be reconnecting or switching channels.
+    await asyncio.sleep(AUTO_LEAVE_DELAY)
+
+    # Re-check — someone may have joined during the wait.
+    vc = member.guild.voice_client
+    if vc is None or vc.channel is None:
+        return
+    if any(not m.bot for m in vc.channel.members):
+        return
+
+    get_queue(member.guild.id).clear()
+    await vc.disconnect()
+
+    channel_id = last_channels.get(member.guild.id)
+    text_channel = bot.get_channel(channel_id) if channel_id else None
+    if text_channel:
+        await text_channel.send("👋 Left the voice channel — nobody else was there.")
 
 
 # --------------------------------------------------------------------------- #
