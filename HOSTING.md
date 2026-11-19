@@ -1,12 +1,31 @@
 # Hosting Guide — 4 Options
 
-A Discord bot must run on a computer 24/7. Here are four ways to do it, from easiest to most control.
+A Discord bot must run on a computer 24/7. Here are four ways to do it, starting with the simplest.
 
 > ⚠️ **Never commit your `.env` file.** Your bot token is a secret. On hosted platforms, set it as an environment variable / secret in the platform's dashboard, not in the code.
 
 ---
 
-## Option 1 — Bot-Hosting.net (FREE + simplest) ⭐ Recommended for most people
+## Option 1 — Your own PC (free, you control it)
+
+**Cost:** $0 (uses your electricity). **Effort:** 1 minute. **Catch:** PC must stay on.
+
+### Windows
+- Double-click **`START BOT.bat`** (or the "Music Bot" desktop shortcut).
+- To auto-start on login: `Win + R` → `shell:startup` → create a shortcut to `START BOT.bat` in that folder.
+- To stop cleanly, press `Ctrl+C` in the console window (this lets Discord update your bot's status instantly).
+
+### Linux / macOS
+```bash
+cd discord-music-bot
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+nohup python bot.py > bot.log 2>&1 &
+```
+
+---
+
+## Option 2 — Bot-Hosting.net (FREE + simplest cloud option) ⭐ Recommended if you want 24/7 for free
 
 **Cost:** $0/month, no credit card. **Effort:** ~5 minutes.
 
@@ -28,7 +47,7 @@ A Discord bot must run on a computer 24/7. Here are four ways to do it, from eas
 
 ---
 
-## Option 2 — Fly.io (effectively free, most reliable)
+## Option 3 — Fly.io (effectively free, most reliable)
 
 **Cost:** ~$2.21/month for a 24/7 bot, but **Fly waives any bill under $5** → you pay $0. **Requires a credit card** on file (not charged). **Effort:** ~15 minutes.
 
@@ -64,7 +83,7 @@ The Dockerfile installs FFmpeg and Python dependencies automatically. The `fly.t
 
 ---
 
-## Option 3 — Oracle Cloud Always-Free VPS (truly free forever)
+## Option 4 — Oracle Cloud Always-Free VPS (truly free forever)
 
 **Cost:** $0 forever. **Effort:** ~45 minutes. Generous free tier: 4 ARM CPUs, 24 GB RAM.
 
@@ -111,32 +130,14 @@ Signup requires a credit card for identity verification, but you are never charg
 
 ---
 
-## Option 4 — Your own PC (free, you control it)
-
-**Cost:** $0 (uses your electricity). **Effort:** 1 minute. **Catch:** PC must stay on.
-
-### Windows
-- Double-click **`START BOT.bat`** (or the "Music Bot" desktop shortcut).
-- To auto-start on login: `Win + R` → `shell:startup` → create a shortcut to `START BOT.bat` in that folder.
-
-### Linux / macOS
-```bash
-cd discord-music-bot
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-nohup python bot.py > bot.log 2>&1 &
-```
-
----
-
 ## Comparison
 
 | Option | Cost | Setup | Uptime | Notes |
 | --- | --- | --- | --- | --- |
-| **Bot-Hosting.net** | Free | Easiest | 24/7 | Renew every 4 days; 256 MB RAM |
+| **Your PC** | Free | Easiest | While PC is on | Full control; no hosting account |
+| **Bot-Hosting.net** | Free | Easy | 24/7 | Renew every 4 days; 256 MB RAM |
 | **Fly.io** | $0 (bill waived) | Easy | 24/7 | Credit card needed; very reliable |
 | **Oracle Cloud** | Free forever | Moderate | 24/7 | Most powerful; free VPS |
-| **Your PC** | Free | Easy | While PC is on | Full control; no hosting account |
 
 ---
 

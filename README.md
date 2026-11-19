@@ -57,10 +57,10 @@ See **[HOSTING.md](HOSTING.md)** for full guides:
 
 | Option | Cost | Effort |
 | --- | --- | --- |
-| **Bot-Hosting.net** | Free | Easiest — upload a ZIP |
+| **Your own PC** | Free | Easiest — `START BOT.bat` |
+| **Bot-Hosting.net** | Free | Easy — upload a ZIP |
 | **Fly.io** | $0 (bill waived under $5) | Easy — `fly deploy`, configs included |
 | **Oracle Cloud Always Free** | Free forever | Moderate — free VPS |
-| **Your own PC** | Free | Easy — `START BOT.bat` |
 
 ---
 
