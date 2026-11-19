@@ -2,8 +2,6 @@
 
 A Discord bot that searches and plays audio from YouTube, with a queue. Built with **discord.py** and **yt-dlp**.
 
-🔗 **Repository:** https://github.com/ChunHawLai/discord-music-bot
-
 ## Commands
 
 | Command | Description |
