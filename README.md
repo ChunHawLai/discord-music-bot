@@ -82,7 +82,7 @@ See **[HOSTING.md](HOSTING.md)** for full guides:
 
 ## Notes
 
-- The bot automatically leaves the voice channel **30 seconds after the last person leaves**.
+- The bot automatically leaves the voice channel **10 seconds after the last person leaves**.
 - Audio is **streamed**, not downloaded, so it uses little disk.
 - Age-restricted / members-only videos may fail — a YouTube limitation.
 - YouTube changes periodically and can break `yt-dlp`. Fix: `pip install -U yt-dlp`.

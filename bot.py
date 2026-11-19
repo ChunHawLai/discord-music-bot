@@ -71,7 +71,7 @@ volumes: dict[int, float] = {}
 # Last text channel used per guild, for the auto-leave notification.
 last_channels: dict[int, int] = {}
 # Seconds to wait (in case someone briefly disconnects) before leaving an empty channel.
-AUTO_LEAVE_DELAY = 30
+AUTO_LEAVE_DELAY = 10
 # Serializes playback start per guild so two commands can't play at once.
 play_locks: dict[int, asyncio.Lock] = {}
 
