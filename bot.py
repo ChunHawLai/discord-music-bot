@@ -68,8 +68,6 @@ ytdl_single = yt_dlp.YoutubeDL({
 
 queues: dict[int, list[dict]] = {}
 volumes: dict[int, float] = {}
-# Last text channel used per guild, for the auto-leave notification.
-last_channels: dict[int, int] = {}
 # Seconds to wait (in case someone briefly disconnects) before leaving an empty channel.
 AUTO_LEAVE_DELAY = 10
 # Serializes playback start per guild so two commands can't play at once.
@@ -138,7 +136,6 @@ async def ensure_voice(ctx: commands.Context) -> bool:
     if not ctx.author.voice or not ctx.author.voice.channel:
         await ctx.send("❌ You need to join a voice channel first.")
         return False
-    last_channels[ctx.guild.id] = ctx.channel.id
     channel = ctx.author.voice.channel
     vc = ctx.voice_client
     if vc is None:
@@ -230,11 +227,6 @@ async def on_voice_state_update(member: discord.Member, before, after):
 
     get_queue(member.guild.id).clear()
     await vc.disconnect()
-
-    channel_id = last_channels.get(member.guild.id)
-    text_channel = bot.get_channel(channel_id) if channel_id else None
-    if text_channel:
-        await text_channel.send("👋 Left the voice channel — nobody else was there.")
 
 
 # --------------------------------------------------------------------------- #
