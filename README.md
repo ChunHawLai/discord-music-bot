@@ -8,7 +8,8 @@ A Discord bot that searches and plays audio from YouTube, with a queue. Built wi
 
 | Command | Description |
 | --- | --- |
-| `!play <song or URL>` | Search YouTube, or paste a video/playlist URL (adds all playlist songs to the queue) |
+| `!play <song or URL>` | Play ONE song (a playlist link plays only its first song) |
+| `!playlist <URL>` | Add ALL songs from a playlist URL to the queue |
 | `!pause` | Pause playback |
 | `!resume` | Resume playback |
 | `!skip` | Skip the current song |

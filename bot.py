@@ -56,7 +56,11 @@ FFMPEG_OPTIONS = {
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
 # A second extractor that never expands playlists — used when playing an
 # individual queued song, so a video URL containing "list=" doesn't re-expand.
-ytdl_single = yt_dlp.YoutubeDL({**YTDL_OPTIONS, "noplaylist": True})
+ytdl_single = yt_dlp.YoutubeDL({
+    **YTDL_OPTIONS,
+    "noplaylist": True,
+    "playlistend": 1,  # Only ever take the first entry from a playlist URL
+})
 
 queues: dict[int, list[dict]] = {}
 volumes: dict[int, float] = {}
@@ -105,12 +109,6 @@ async def extract_info(url: str, *, single: bool = False) -> dict:
     return await loop.run_in_executor(
         None, lambda: tool.extract_info(url, download=False)
     )
-
-
-def looks_like_playlist(query: str) -> bool:
-    """Rough check for a playlist URL (vs a plain search or single video)."""
-    q = query.lower()
-    return "list=" in q or "/playlist" in q
 
 
 def get_queue(guild_id: int) -> list[dict]:
@@ -189,7 +187,8 @@ async def help_command(ctx: commands.Context):
         color=discord.Color.blurple(),
     )
     for name, desc in [
-        ("!play <song or URL>", "Search YouTube, or paste a video/playlist URL"),
+        ("!play <song or URL>", "Play ONE song (playlist link = first song only)"),
+        ("!playlist <URL>", "Add ALL songs from a playlist URL to the queue"),
         ("!pause", "Pause playback"),
         ("!resume", "Resume playback"),
         ("!skip", "Skip the current song"),
@@ -211,62 +210,15 @@ async def join(ctx: commands.Context):
         await ctx.send(f"🔊 Joined **{ctx.author.voice.channel.name}**.")
 
 
-@bot.command(name="play", aliases=["p"])
-async def play(ctx: commands.Context, *, query: str):
-    if not query:
-        await ctx.send("⚠️ Give me a song name or YouTube URL. Example: `!play never gonna give you up`")
-        return
-    if not await ensure_voice(ctx):
-        return
-
-    search_msg = await ctx.send("🔎 Searching YouTube...")
-    queue = get_queue(ctx.guild.id)
-
-    # --- Playlist URL: expand every entry into the queue ---
-    if looks_like_playlist(query):
-        try:
-            data = await extract_info(query)
-        except Exception as exc:  # noqa: BLE001
-            await search_msg.edit(content=f"❌ Couldn't load that playlist: {exc}")
-            return
-
-        entries = [e for e in (data.get("entries") or []) if e]
-        songs = []
-        for entry in entries:
-            web_url = entry.get("webpage_url") or entry.get("url")
-            if not web_url:
-                continue
-            songs.append({
-                "web_url": web_url,
-                "title": entry.get("title") or "Unknown title",
-                "duration": entry.get("duration"),
-                "requester": ctx.author.display_name,
-            })
-
-        if not songs:
-            await search_msg.edit(content="❌ No playable songs found in that playlist.")
-            return
-
-        queue.extend(songs)
-        vc = ctx.voice_client
-        if vc and (vc.is_playing() or vc.is_paused()):
-            await search_msg.edit(
-                content=f"✅ Added **{len(songs)}** songs from the playlist to the queue."
-            )
-        else:
-            await search_msg.edit(
-                content=f"✅ Added **{len(songs)}** songs — now playing: **{songs[0]['title']}**"
-            )
-            await play_next(ctx, announce=False)
-        return
-
-    # --- Single song / search query ---
+async def queue_single_song(ctx: commands.Context, query: str, search_msg):
+    """Extract one song (never a whole playlist), queue it, and start if idle."""
     try:
         source = await YTDLSource.from_url(query, volume=get_volume(ctx.guild.id))
     except Exception as exc:  # noqa: BLE001
         await search_msg.edit(content=f"❌ Couldn't find or play that: {exc}")
         return
 
+    queue = get_queue(ctx.guild.id)
     queue.append({
         "web_url": source.webpage_url or source.url,
         "title": source.title,
@@ -281,6 +233,64 @@ async def play(ctx: commands.Context, *, query: str):
         )
     else:
         await search_msg.edit(content=f"🎵 Now playing: **{source.title}**")
+        await play_next(ctx, announce=False)
+
+
+@bot.command(name="play", aliases=["p"])
+async def play(ctx: commands.Context, *, query: str):
+    """Play ONE song from a search or URL (playlist links play first song only)."""
+    if not query:
+        await ctx.send("⚠️ Give me a song name or YouTube URL. Example: `!play never gonna give you up`")
+        return
+    if not await ensure_voice(ctx):
+        return
+    search_msg = await ctx.send("🔎 Searching YouTube...")
+    await queue_single_song(ctx, query, search_msg)
+
+
+@bot.command(name="playlist", aliases=["pl"])
+async def play_playlist(ctx: commands.Context, *, query: str):
+    """Add every song from a playlist URL to the queue."""
+    if not query:
+        await ctx.send("⚠️ Give me a playlist URL. Example: `!playlist https://www.youtube.com/playlist?list=...`")
+        return
+    if not await ensure_voice(ctx):
+        return
+
+    search_msg = await ctx.send("🔎 Loading playlist...")
+    try:
+        data = await extract_info(query)
+    except Exception as exc:  # noqa: BLE001
+        await search_msg.edit(content=f"❌ Couldn't load that playlist: {exc}")
+        return
+
+    songs = []
+    for entry in [e for e in (data.get("entries") or []) if e]:
+        web_url = entry.get("webpage_url") or entry.get("url")
+        if not web_url:
+            continue
+        songs.append({
+            "web_url": web_url,
+            "title": entry.get("title") or "Unknown title",
+            "duration": entry.get("duration"),
+            "requester": ctx.author.display_name,
+        })
+
+    if not songs:
+        await search_msg.edit(content="❌ No playable songs found in that playlist.")
+        return
+
+    queue = get_queue(ctx.guild.id)
+    queue.extend(songs)
+    vc = ctx.voice_client
+    if vc and (vc.is_playing() or vc.is_paused()):
+        await search_msg.edit(
+            content=f"✅ Added **{len(songs)}** songs from the playlist to the queue."
+        )
+    else:
+        await search_msg.edit(
+            content=f"✅ Added **{len(songs)}** songs — now playing: **{songs[0]['title']}**"
+        )
         await play_next(ctx, announce=False)
 
 
