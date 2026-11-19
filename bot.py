@@ -55,7 +55,6 @@ FFMPEG_OPTIONS = {
     "options": "-vn",
 }
 
-ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
 # Playlist extraction tolerates unavailable/private videos instead of aborting.
 ytdl_playlist = yt_dlp.YoutubeDL({**YTDL_OPTIONS, "ignoreerrors": True})
 # A second extractor that never expands playlists — used when playing an
@@ -72,6 +71,8 @@ volumes: dict[int, float] = {}
 AUTO_LEAVE_DELAY = 10
 # Serializes playback start per guild so two commands can't play at once.
 play_locks: dict[int, asyncio.Lock] = {}
+# Bumped on stop/leave so an in-flight extraction can't start a song afterwards.
+stop_generation: dict[int, int] = {}
 
 
 # --------------------------------------------------------------------------- #
@@ -110,10 +111,10 @@ class YTDLSource(discord.PCMVolumeTransformer):
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
-async def extract_info(url: str, *, single: bool = False, tolerant: bool = False) -> dict:
+async def extract_info(url: str, *, single: bool = False) -> dict:
     """Run yt-dlp in a thread so it doesn't block the bot's event loop."""
     loop = asyncio.get_running_loop()
-    tool = ytdl_single if single else (ytdl_playlist if tolerant else ytdl)
+    tool = ytdl_single if single else ytdl_playlist
     return await loop.run_in_executor(
         None, lambda: tool.extract_info(url, download=False)
     )
@@ -129,6 +130,14 @@ def get_volume(guild_id: int) -> float:
 
 def get_play_lock(guild_id: int) -> asyncio.Lock:
     return play_locks.setdefault(guild_id, asyncio.Lock())
+
+
+def get_generation(guild_id: int) -> int:
+    return stop_generation.get(guild_id, 0)
+
+
+def bump_generation(guild_id: int) -> None:
+    stop_generation[guild_id] = get_generation(guild_id) + 1
 
 
 async def ensure_voice(ctx: commands.Context) -> bool:
@@ -158,6 +167,7 @@ def after_playback(ctx: commands.Context, error):
 
 async def play_next(ctx: commands.Context):
     """Start the next queued song if idle. Safe to call from multiple places."""
+    generation = get_generation(ctx.guild.id)
     async with get_play_lock(ctx.guild.id):
         vc = ctx.voice_client
         if vc is None or vc.is_playing() or vc.is_paused():
@@ -173,6 +183,8 @@ async def play_next(ctx: commands.Context):
             except Exception as exc:  # noqa: BLE001
                 await ctx.send(f"❌ Could not play **{song['title']}**: {exc}")
                 continue  # Skip the bad song and try the next one.
+            if get_generation(ctx.guild.id) != generation:
+                return  # Stop/leave happened while we were extracting.
             vc.play(source, after=lambda err: after_playback(ctx, err))
             await ctx.send(f"🎵 Now playing: **{source.title}**")
             return
@@ -225,6 +237,7 @@ async def on_voice_state_update(member: discord.Member, before, after):
     if any(not m.bot for m in vc.channel.members):
         return
 
+    bump_generation(member.guild.id)
     get_queue(member.guild.id).clear()
     await vc.disconnect()
 
@@ -266,11 +279,14 @@ async def join(ctx: commands.Context):
 
 async def queue_single_song(ctx: commands.Context, query: str, search_msg):
     """Extract one song (never a whole playlist), queue it, and start if idle."""
+    generation = get_generation(ctx.guild.id)
     try:
         source = await YTDLSource.from_url(query, volume=get_volume(ctx.guild.id))
     except Exception as exc:  # noqa: BLE001
         await search_msg.edit(content=f"❌ Couldn't find or play that: {exc}")
         return
+    if get_generation(ctx.guild.id) != generation:
+        return  # Stop/leave happened while we were extracting.
 
     queue = get_queue(ctx.guild.id)
     queue.append({
@@ -311,12 +327,15 @@ async def play_playlist(ctx: commands.Context, *, query: str):
     if not await ensure_voice(ctx):
         return
 
+    generation = get_generation(ctx.guild.id)
     search_msg = await ctx.send("🔎 Loading playlist...")
     try:
-        data = await extract_info(query, tolerant=True)
+        data = await extract_info(query)
     except Exception as exc:  # noqa: BLE001
         await search_msg.edit(content=f"❌ Couldn't load that playlist: {exc}")
         return
+    if get_generation(ctx.guild.id) != generation:
+        return  # Stop/leave happened while we were extracting.
 
     songs = []
     for entry in [e for e in (data.get("entries") or []) if e]:
@@ -378,6 +397,7 @@ async def skip(ctx: commands.Context):
 
 @bot.command(name="stop")
 async def stop(ctx: commands.Context):
+    bump_generation(ctx.guild.id)
     get_queue(ctx.guild.id).clear()
     vc = ctx.voice_client
     if vc:
@@ -414,6 +434,7 @@ async def volume(ctx: commands.Context, level: int):
 
 @bot.command(name="leave", aliases=["disconnect", "dc"])
 async def leave(ctx: commands.Context):
+    bump_generation(ctx.guild.id)
     get_queue(ctx.guild.id).clear()
     vc = ctx.voice_client
     if vc:
